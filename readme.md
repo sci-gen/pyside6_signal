@@ -1,6 +1,6 @@
 今回は、PySide6を使って、シグナル/スロットメカニズムを学んでいきます。
 Pyside6はpythonで簡単にGUIアプリケーションを作成できるパッケージです。
-もともとはC++だったみたいなのですが、いつの間にかpythonでも使えていた、ということみたいです。
+もともとはC++だったみたいなのですが、QtのPythonバインディング（PySide/PyQt）として提供され、Python からも利用できるようになっています。
 シグナル/スロットメカニズムはボタンなどのユーザーが起こしたアクションを起点に内部で処理を行う仕組みなのですが、なんとも回りくどいような気がしたので整理してみることにしました。
 
 
@@ -70,7 +70,7 @@ if __name__ == '__main__':
 
 ### 挙動
 コードを実行すると以下のようなウィンドウが出現します。
-![image](image.png)
+![『シグナルを発行』というボタンが1つ配置されたシンプルなウィンドウ」](image.png)
 `シグナルを発行`ボタンを押すと、以下のようなコメントがコンソールに現れました。
 ```bash
 > py main.py
@@ -79,7 +79,7 @@ if __name__ == '__main__':
 ```
 
 ### ユーザーがクリックしたあとの流れ
-コードのコメントだけでも十分に流れは終えるのですが、一旦図にしてみましょう。
+コードのコメントだけでも十分に流れは終えるのですが、図にしてみましょう。
 ```mermaid
 sequenceDiagram
     participant User as ユーザー
@@ -106,7 +106,7 @@ sequenceDiagram
 5.  `custom_signal` に接続されている `on_signal_received()` メソッド（スロット）が呼び出されます（**SignalReceiver** (Receiver)）。
 6.  `on_signal_received()` で、`print`(コンソールへの出力:"カスタムシグナルを受け取りました！") が実行されます。
 
-たしかに、ボタンを押すと`on_signal_recieved`が呼び出されました。
+たしかに、ボタンを押すと`on_signal_received`が呼び出されました。
 しかし、emit_the_signal メソッドから直接 `on_signal_received` メソッド（あるいはそれに相当する関数）を呼び出せば、`emit()` や `connect()` の記述が不要になり、コードが短くなるように思えます。
 
 ### わざわざシグナル/スロットを使う理由
@@ -122,49 +122,98 @@ sequenceDiagram
 
 #### 解決:シグナル/スロットによって役割を分担する（疎結合）
 
-1.  **依存関係の分離:**
-    * （発信側）`Emitter` は「特定のイベントが発生した」というシグナルを発行する**だけ**です。誰がそのシグナルを受け取るか、受け取った後で何をするかについて、`Emitter` は**一切関知しません**。<--これは便利なのですが、異なるUIで同じ挙動を起こしたいときに、同じrecieverと接続すると2回実行されてしまうことがあるんですよね。そのため、一度シグナルを受け取ったらブロックする必要があったりもします。
-    * （受信側）`Receiver` は「特定のシグナルが来たら、この処理を実行する」と宣言（接続）する**だけ**です。そのシグナルがどこから、どんなきっかけで発行されたかについて、`Receiver` は**関知しません**（知る必要がありません）。
-
-  ```mermaid
+```mermaid
 graph LR
     subgraph Emitter [Emitter オブジェクト]
-        direction TB
-        trigger([イベント発生<br>例: ボタンクリック]) --> emit(シグナル発行<br>emit());
+        trigger[イベント発生 <br> click] --> emit[シグナル発行];
     end
 
     subgraph Receiver [Receiver オブジェクト]
-        direction TB
-        slot(スロット実行<br>処理を行うメソッド) --> result([処理結果]);
+        slot[スロット実行 <br> 処理メソッド] --> result[処理結果];
     end
 
-    subgraph SignalSlotMechanism [シグナル/スロット機構 (Qt/PySide)]
-        direction LR
-        connect(接続確立<br>connect());
-        signal_delivery(シグナル伝達);
-
+    subgraph SignalSlotMechanism [シグナル/スロット機構]
+        connect[接続確立 connect];
+        signal_delivery[シグナル伝達];
         connect -.-> signal_delivery;
     end
 
-    Emitter -- シグナル --> SignalSlotMechanism;
-    SignalSlotMechanism -- スロット呼び出し --> Receiver;
+    %% サブグラフ間の接続定義 (コメントは %% で開始)
+    Emitter -- "シグナル" --> SignalSlotMechanism;
+    SignalSlotMechanism -- "スロット呼び出し" --> Receiver;
 
+    %% スタイル定義 (コメントは %% で開始)
     style Emitter fill:#FFE4E1,stroke:#B22222,stroke-width:2px
     style Receiver fill:#E0FFFF,stroke:#008B8B,stroke-width:2px
     style SignalSlotMechanism fill:#FFFFE0,stroke:#DAA520,stroke-width:1px,stroke-dasharray: 5 5
-    ```
+```
 
-1.  **再利用性の向上:** `Emitter` も `Receiver` も、それぞれ独立したコンポーネントとして、他の様々な部品と自由に組み合わせることができます。これが大きいですね。
-2.  **保守性の向上:** `Receiver` の内部実装やメソッド名が変わっても、シグナル名と接続が変わらなければ `Emitter` に影響はありません。逆も同様です。保守性は実務の経験が乏しいのでなんとも言えませ。あんまり恩恵を感じられませんがこれからわかるかもしれません。
-3.  **拡張性の向上:** ボタンクリック時に新しい処理を追加したければ、新しいクラス（スロットを持つ）を作成し、`Emitter` のシグナルに `connect()` するだけで済みます。`Emitter` のコードを**一切変更する必要がありません**。
-4.  **多対多の接続:**
+1.  **依存関係の分離:**
+    * （発信側）`Emitter` は「特定のイベントが発生した」というシグナルを発行する**だけ**です。誰がそのシグナルを受け取るか、受け取った後で何をするかについて、`Emitter` は**一切関知しません**。
+    * （受信側）`Receiver` は「特定のシグナルが来たら、この処理を実行する」と宣言（接続）する**だけ**です。そのシグナルがどこから、どんなきっかけで発行されたかについて、`Receiver` は**関知しません**（知る必要がありません）。
+2.  **再利用性の向上:** `Emitter` も `Receiver` も、それぞれ独立したコンポーネントとして、他の様々な部品と自由に組み合わせることができます。これが大きいですね。
+3.  **保守性の向上:** `Receiver` の内部実装やメソッド名が変わっても、シグナル名と接続が変わらなければ `Emitter` に影響はありません。逆も同様です。例えば、`Receiver`の`on_signal_received`メソッド名が変わっても、`signal.connect()` の部分(`self.emitter.custom_signal.connect(self.on_signal_received)`)だけ変更すればよいわけです。これなら、`Emitter`の変更は不要ですね。
+4.  **拡張性の向上:** 例えば、ボタンクリック時に新しい処理を追加したい場合は、新しいクラス（スロットを持つ）を作成し、`Emitter` のシグナルに `connect()` するだけで済みます。`Emitter` のコードを**一切変更する必要がありません**。
+5.  **多対多の接続:**
     * 1つのシグナルに複数のスロットを接続できます（例：ボタンクリックで、ログ出力と表示更新の両方を行う）。
     * 複数の異なるシグナルを1つのスロットに接続することもできます（例：OKボタンクリックでも、Enterキー押下でも、同じ処理を実行する）。
     直接呼び出しでこれを実現しようとすると、条件分岐が多くなりコードが複雑になります。
-5.  **スレッド間通信:** Qt/PySideのシグナル/スロットは、異なるスレッド間で安全にデータをやり取りする仕組み（Queued Connection）も提供しています。直接メソッドを呼び出す方法では、スレッドセーフティを自分で慎重に管理する必要があり、非常に複雑でバグが発生しやすくなります。
+    * これは便利なのですが、異なるUIで同じ挙動を起こしたいときに、同じ`Receiver`と接続すると2回実行されてしまうことがあるんですよね。そのため、一度シグナルを受け取ったらブロックする必要があり、注意です。
+6.  **スレッド間通信:** Qt/PySideのシグナル/スロットは、異なるスレッド間で安全にデータをやり取りする仕組み（Queued Connection）も提供しています。直接メソッドを呼び出す方法では、スレッドセーフティを自分で慎重に管理する必要があり、非常に複雑でバグが発生しやすくなります。
 
-### 結論
 
-`emit()` や `connect()` を書く手間は、コンポーネント間の**疎結合**という大きなメリットを得るためのトレードオフです。
+依然として、コード例では、
+`Receiver`クラスにUIとUIから`emitter`への接続、
+```python
+button.clicked.connect(self.emitter.emit_the_signal)
+```
 
-提示されたような非常にシンプルな例では、直接呼び出しでも問題ないように見えるかもしれません。しかし、アプリケーションが少しでも複雑になり、多くのコンポーネントが連携するようになると、シグナル/スロットによる疎結合の恩恵（**再利用性**、**保守性**、**拡張性**、**スレッド安全性**）が非常に大きくなります。これが、Qt/PySide のようなフレームワークでシグナル/スロットが中心的な役割を果たしている理由です。
+`emitter`から`slot`への接続
+
+```python
+self.emitter.custom_signal.connect(self.on_signal_received)
+```
+
+が記述され、完全な疎結合とは言えません。しかし、小さいアプリケーションであれば、この程度は許容してもいいんじゃないかと思います。
+ただ、以下のように、`UI`と`Receiver`くらいは分離しても良さそうです。
+
+```python
+# 1. シグナル発行クラス
+Emitter:
+  # カスタムシグナル
+  def __init__(self):
+    self.signal = Signal() 
+  # きっかけとなるメソッド
+  def emit_method(self): 
+    # (1) シグナル発行
+    self.signal.emit() 
+
+# 2. UI担当 兼 接続設定クラス
+Receiver:
+  # EmitterとProcessorのインスタンスを受け取る想定
+  def __init__(self, emitter, processor): 
+    self.emitter = emitter
+    self.processor = processor
+    # (3) Emitterのシグナルと Processor のスロットを接続
+    # Processorインスタンスのメソッドへ接続
+    self.emitter.signal.connect(self.processor.slot_method) 
+    self.init_ui() # UI初期化呼び出し(描画)
+
+  def init_ui(self): # UI初期化メソッド
+    button = ... # ボタン作成
+    # (2) UIイベント(ボタンクリック)とEmitterのメソッドを接続
+    button.clicked.connect(self.emitter.emit_method)
+
+# 3. 処理担当クラス
+Processor:
+  # スロットであることを明示
+  @Slot()
+  # (4) シグナルを受け取って処理を実行
+  def slot_method(self):
+    pass
+```
+
+しかし、AIが`Receiver`にスロットを統合しようと変換候補を出してきました。
+もしかしたら、この書き方は一般的ではないのかもしれません。
+
+> ちなみに、`@Slot()`はなくても動作しました。Pythonの性質かもしれません。
